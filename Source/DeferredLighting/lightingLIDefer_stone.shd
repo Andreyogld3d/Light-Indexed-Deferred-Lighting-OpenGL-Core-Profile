@@ -1,0 +1,166 @@
+/////////////////////////////////////////////////////////////////////
+// LightingLIDefer_stone
+// This shader program does the same as the LightingLIDefer program 
+// except rendering with a stone like texture.
+// See LightingLIDefer for full details
+/////////////////////////////////////////////////////////////////////
+
+[Vertex shader]
+
+uniform mat4  ModelViewProjectionMatrix;
+uniform mat4  ModelViewMatrix;
+
+layout(location = 0) in vec4 POSITION;
+layout(location = 4) in vec3 Normal;
+
+out vec4 projectSpace;
+out vec3 vScaledPosition;
+out vec3 vNormalES;
+out vec3 vVec;
+
+vec4 CalcLightProjSpaceLookup(vec4 projectSpace) {
+  	projectSpace.xy = (projectSpace.xy + vec2(projectSpace.w)) * 0.5;
+	return projectSpace;
+}
+
+void main(){
+  //projectSpace = ModelViewProjectionMatrix * gl_Vertex;
+	projectSpace = ModelViewProjectionMatrix * POSITION;
+  gl_Position = projectSpace;
+
+  projectSpace = CalcLightProjSpaceLookup(projectSpace);
+
+  // Just output model coordinates for this so marble doesn't swim all over
+  //vScaledPosition = gl_Vertex.xyz * 0.009;
+	vScaledPosition = POSITION.xyz * 0.009;
+
+  // Camera pos not in model space?
+  //vVec = (ModelViewMatrix * gl_Vertex).xyz;
+	vVec = (ModelViewMatrix * POSITION).xyz;
+  vNormalES = mat3(ModelViewMatrix) * Normal;
+   //vNormalES = Normal;
+  //vNormalES = mat3(gl_NormalMatrix) * Normal;
+}
+
+
+
+[Fragment shader]
+
+#extension GL_ARB_uniform_buffer_object : enable
+
+#ifndef __GLSL_CG_DATA_TYPES
+#define hfloat float
+#define hvec2 vec2
+#define hvec3 vec3
+#define hvec4 vec4
+#else
+#define hfloat half
+#define hvec2 half2
+#define hvec3 half3
+#define hvec4 half4
+#endif
+
+uniform sampler3D Noise;
+uniform sampler2D BitPlane;
+
+struct Light {
+	vec4 posRange;
+	vec4 lightColor;
+};
+
+#ifdef USE_UBO
+
+layout(std140) uniform UBO {
+	Light lights[255];
+};
+
+#endif
+
+// TODO: Combine into one texture? use 1D textures?
+uniform sampler1D LightPosTex;
+uniform sampler1D LightColorTex;
+
+in vec4 projectSpace;
+in vec3 vScaledPosition;
+in vec3 vNormalES;
+in  vec3 vVec;
+
+out vec4 color;
+
+vec4 GetLightIndexImpl(sampler2D BitPlane, vec2 uv) {
+	vec4 packedLight = texture2D(BitPlane, uv);
+    // Set depending on the texture size
+	const vec4 unpackConst = vec4(4.0f, 16.0f, 64.0f, 256.0f) / 256.0f;
+    // Expand out to the 0..255 range (ceil to avoid precision errors)
+	vec4 floorValues = ceil(packedLight * 254.5f);
+	vec4 lightIndex;
+	for(int i = 0; i < 4; i++) {
+		packedLight = floorValues * 0.25f;
+		floorValues = floor(packedLight);
+		vec4 fracParts = packedLight - floorValues;
+		lightIndex[i] = dot(fracParts, unpackConst);
+	}
+	return lightIndex;
+}
+
+void main(){
+
+  hfloat noisy = texture3D(Noise, vScaledPosition).x;
+
+  // Base marble color
+  hfloat marble = (0.2 + 5.0 * abs(noisy - 0.5));
+  hfloat Ks = saturate(1.1 - 1.3 * marble);
+
+	vec3 viewVec = normalize(vVec);
+  vec3 normal = normalize(vNormalES);
+
+  // Set initial ambient lighting
+  hvec3 lighting = hvec3(marble * 0.2);
+
+  // Get reflection view vector
+  hvec3 reflVec = reflect(viewVec, -normal);
+
+  // Look up the bit planes texture
+  //hvec4 packedLight = texture2DProj(BitPlane, projectSpace);
+  vec2 texcoord = projectSpace.xy / projectSpace.w;
+  hvec4 packedLight = GetLightIndexImpl(BitPlane, texcoord);
+  // Unpack each lighting channel
+  for(int i=0; i< 4; i++)
+  {
+    hfloat lightIndex = packedLight[i];
+#ifdef USE_UBO
+	Light light = lights[int(lightIndex * 255.0)];
+    vec4 lightViewPos = light.posRange; 
+	hvec3 lightColor = light.lightColor.rgb;
+#else
+    // Lookup the Light position (with inverse radius in alpha)
+    vec4 lightViewPos = texture1D(LightPosTex, lightIndex); 
+
+    // Lookup the light color
+    hvec3 lightColor = texture1D(LightColorTex, lightIndex).rgb;
+#endif
+    // Get the vector from the light center to the surface
+    vec3 lightVec = lightViewPos.xyz - vVec;
+    
+    // Scale based on the light radius
+    vec3 lVec = lightVec * lightViewPos.a;
+
+    // Calculate attenuation
+	  float atten = saturate(1.0 - dot(lVec, lVec));
+    // TODO: Add a checkd for back facing polygons - like humus demo? - dot product with tangent space normal in view space?
+    //atten *= float(lVec.z > 0.0);
+
+    // Calculate the light normal
+    lightVec = normalize(lightVec);
+    
+    // TODO: store the light values and combine later? (do one "pow")
+		hfloat diffuse = saturate(dot(lightVec, normal));
+		hfloat specular = pow(saturate(dot(lightVec, reflVec)), 24.0);
+
+		lighting += atten * lightColor * (diffuse * marble + Ks * specular);
+  }
+
+  color.rgb = lighting;
+  color.a = 1.0;
+}
+

@@ -1,0 +1,200 @@
+/////////////////////////////////////////////////////////////////////
+// LightingLIDefer
+// This shader program takes a screen sized light index texture and
+// lights rendered geometry using it. 
+//
+// The light indexed texture can be layed out in one of three ways:
+//   1) 3-4 Lights bit-packed
+//   2) 2 Lights max blend equation packed
+//   3) 1 Light - no packing
+//
+// The packing technique used is via a OVERLAP_LIGHTS define.
+//
+// See http://lightindexed-deferredrender.googlecode.com/files/LightIndexedDeferredLighting1.1.pdf 
+// for full details
+/////////////////////////////////////////////////////////////////////
+
+[Vertex shader]
+
+layout(location = 0) in vec4 POSITION;
+layout(location = 8) in vec2 textureCoord;
+
+in vec3 tangent;
+in vec3 binormal;
+layout(location = 4) in vec3 normal;
+
+uniform vec3 camPos;
+uniform mat4  ModelViewProjectionMatrix;
+uniform mat4  ModelViewMatrix;
+
+out vec2 texCoord;
+out vec3 vVec;
+out vec4 projectSpace;
+out vec3 vVecTangent;
+
+out mat3 tangentToView;
+
+void main(){
+
+  // Calculate the output position and projection space lookup
+ //projectSpace = ModelViewProjectionMatrix * gl_Vertex;
+	//projectSpace = ModelViewProjectionMatrix * POSITION;
+	projectSpace = ModelViewProjectionMatrix * POSITION;
+  gl_Position = projectSpace;
+ 	projectSpace.xy = projectSpace.xy * 0.5 + vec2(projectSpace.w) * 0.5;
+
+  // Pass-through tex-coord
+	texCoord = textureCoord;
+
+  // Calculate the transform from tangent space to view space
+  mat3 modelToTangent = mat3(tangent, binormal, normal);
+
+  // Calculate the tangent space to view space matrix
+  //tangentToView = gl_NormalMatrix * modelToTangent;
+  tangentToView = mat3(ModelViewMatrix) * modelToTangent;
+
+  // Calculate the view vector in view space
+	//vVec = (ModelViewMatrix * gl_Vertex).xyz;
+	vVec = (ModelViewMatrix * POSITION).xyz;
+
+  // Calculate the view vector in tangent space
+	//vec3 viewVec = camPos - gl_Vertex.xyz;
+	vec3 viewVec = camPos - vVec.xyz;
+	vVecTangent.x = dot(viewVec, tangent);
+	vVecTangent.y = dot(viewVec, binormal);
+	vVecTangent.z = dot(viewVec, normal);
+}
+
+
+[Fragment shader]
+
+#extension GL_ARB_uniform_buffer_object : enable
+
+#ifndef __GLSL_CG_DATA_TYPES
+#define hfloat float
+#define hvec2 vec2
+#define hvec3 vec3
+#define hvec4 vec4
+#else
+#define hfloat half
+#define hvec2 half2
+#define hvec3 half3
+#define hvec4 half4
+#endif
+
+uniform sampler2D Base;
+uniform sampler2D Bump;
+
+uniform bool hasParallax;
+uniform vec2 plxCoeffs;
+
+uniform sampler2D BitPlane;
+
+struct Light {
+	vec4 posRange;
+	vec4 lightColor;
+};
+
+#ifdef USE_UBO
+
+layout(std140) uniform UBO {
+	Light lights[255];
+};
+
+#endif
+
+
+// TODO: Combine into one texture? use 1D textures?
+uniform sampler1D LightPosTex;
+uniform sampler1D LightColorTex;
+
+in vec2 texCoord;
+in vec4 projectSpace;
+in mat3 tangentToView;
+in vec3 vVec;
+in vec3 vVecTangent;
+
+out vec4 color;
+
+vec4 GetLightIndexImpl(sampler2D BitPlane, vec2 uv) {
+	vec4 packedLight = texture2D(BitPlane, uv);
+    // Set depending on the texture size
+	const vec4 unpackConst = vec4(4.0f, 16.0f, 64.0f, 256.0f) / 256.0f;
+    // Expand out to the 0..255 range (ceil to avoid precision errors)
+	vec4 floorValues = ceil(packedLight * 254.5f);
+	vec4 lightIndex;
+	for(int i = 0; i < 4; i++) {
+		packedLight = floorValues * 0.25f;
+		floorValues = floor(packedLight);
+		vec4 fracParts = packedLight - floorValues;
+		lightIndex[i] = dot(fracParts, unpackConst);
+	}
+	return lightIndex;
+}
+
+void main(){
+
+  // Calculate the texture lookup offsets
+	vec2 plxTexCoord = texCoord;
+	if (hasParallax){
+		float height = texture2D(Bump, texCoord).w;
+		float offset = height * plxCoeffs.x + plxCoeffs.y;
+		plxTexCoord += offset * normalize(vVecTangent).xy;
+	}
+
+  // Lookup the base textures
+	hvec3 base = texture2D(Base, plxTexCoord).rgb;
+	hvec3 bump = texture2D(Bump, plxTexCoord).xyz * 2.0 - 1.0;
+	bump = normalize(bump);
+
+  // Set initial ambient lighting
+  hvec3 lighting = base * 0.2;
+
+  // Get the bump normal in view space
+  hvec3 bumpView = normalize(tangentToView * bump);
+
+  // Get reflection view vector
+  hvec3 reflVec = reflect(normalize(vVec), bumpView);
+  vec2 texcoord = projectSpace.xy / projectSpace.w;
+  hvec4 packedLight = GetLightIndexImpl(BitPlane, texcoord);
+  // Unpack each lighting channel
+  for(int i=0; i< 4; i++)
+  {
+    hfloat lightIndex = packedLight[i];
+#ifdef USE_UBO
+	Light light = lights[int(lightIndex * 255.0) ];
+	//Light light = lights[lightIndex];
+	vec4 lightViewPos = light.posRange;
+	hvec3 lightColor = light.lightColor.rgb;
+#else
+    // Lookup the Light position (with inverse radius in alpha)
+    vec4 lightViewPos = texture1D(LightPosTex, lightIndex); 
+
+    // Lookup the light color
+    hvec3 lightColor = texture1D(LightColorTex, lightIndex).rgb;
+#endif
+    // Get the vector from the light center to the surface
+    vec3 lightVec = lightViewPos.xyz - vVec;
+    
+    // Scale based on the light radius
+    vec3 lVec = lightVec * lightViewPos.a;
+
+    // Calculate attenuation
+	  float atten = saturate(1.0 - dot(lVec, lVec));
+    // TODO: Add a checkd for back facing polygons - like humus demo? - dot product with tangent space normal in view space?
+    //atten *= float(lVec.z > 0.0);
+
+    // Calculate the light normal
+    lightVec = normalize(lightVec);
+    
+    // TODO: store the light values and combine later? (do one "pow"?)
+		hfloat diffuse = saturate(dot(lightVec, bumpView));
+		hfloat specular = pow(saturate(dot(lightVec, reflVec)), 16.0);
+
+		lighting += atten * lightColor * (diffuse * base + 0.6 * specular);
+  }
+
+  color.rgb = lighting;
+  color.a = 1.0;
+}
+

@@ -1,0 +1,44 @@
+/////////////////////////////////////////////////////////////////////
+// LightingColorOnly
+// This shader program positions a light volume in the scene and 
+// outputs the light's colour
+/////////////////////////////////////////////////////////////////////
+
+[Vertex shader]
+
+uniform vec4 LightData;
+uniform mat4  ModelViewProjectionMatrix;
+
+layout(location = 0) in vec4 POSITION;
+
+void main(){
+
+  // Position the light sphere in the scene
+  //vec4 outPos = gl_ModelViewProjectionMatrix * vec4(LightData.xyz + (gl_Vertex.xyz * LightData.w), 1.0);
+	//vec4 outPos = ModelViewProjectionMatrix * vec4(LightData.xyz + (gl_Vertex.xyz * LightData.w), 1.0);
+	vec4 outPos = ModelViewProjectionMatrix * vec4(LightData.xyz + (POSITION.xyz * LightData.w), 1.0);
+
+#ifdef CLAMP_DEPTH
+  
+  // If the position is behind the near plane, clamp
+  if(outPos.z < -outPos.w)
+  {
+    //TODO: This seems to work in this demo case, not sure why..
+    outPos.z = -0.999999;
+    outPos.w = 1.0;
+  }
+
+#endif
+
+  gl_Position = outPos;
+}
+
+
+[Fragment shader]
+uniform vec4 outColor;
+
+out vec4 color;
+
+void main(){
+	color = outColor;
+}
