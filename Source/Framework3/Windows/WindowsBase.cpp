@@ -178,7 +178,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hLastInst, LPSTR lpszCmdLine, 
 					//TranslateMessage(&msg);
 					DispatchMessage(&msg);
 				}
-				if (msg.message == WM_QUIT) break;
+				if (WM_QUIT == msg.message || WM_CLOSE == msg.message) break;
 
 				app->updateTime();
 				app->makeFrame();

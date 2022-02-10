@@ -45,6 +45,7 @@ LightData App::lightDataArray[MAX_LIGHT_TOTAL] = {
 };
 
 #define USE_UBO
+//#define USE_D3D_STYLE
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -565,7 +566,9 @@ bool App::onMouseWheel(const int x, const int y, const int scroll){
 ///////////////////////////////////////////////////////////////////////////////
 //
 bool App::load(){
-
+#ifdef	USE_D3D_STYLE
+	glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE);
+#endif
   glGenVertexArrays(1, &vao);
   if (!map->makeDrawable(renderer)) return false;
   if (!sphereModel->makeDrawable(renderer)) return false;
@@ -848,22 +851,27 @@ void App::drawLIDeferLight(GLubyte lightIndex, const vec3 &lightPosition, float 
 		vec4 viewSpaceLightPos = modelviewMatrix * vec4(lightPosition, 1.0f);
 		vec4 nearVec = projectionMatrix * (viewSpaceLightPos - diffVector);
 		vec4 farVec = projectionMatrix * (viewSpaceLightPos + diffVector);
-
+#ifdef	USE_D3D_STYLE
+		float nearVal = clamp(nearVec.z / nearVec.w, 0.0f, 1.0f);// *0.5f + 0.5f;
+		float farVal = clamp(farVec.z / farVec.w, 0.0f, 1.0f);// *0.5f + 0.5f;
+#else
 		float nearVal = clamp(nearVec.z / nearVec.w, -1.0f, 1.0f) * 0.5f + 0.5f;
+		float farVal = clamp(farVec.z / farVec.w, -1.0f, 1.0f) * 0.5f + 0.5f;
+#endif
 		if (nearVec.w <= 0.0f) {
 			nearVal = 0.0f;
 		}
-		float farVal = clamp(farVec.z / farVec.w, -1.0f, 1.0f) * 0.5f + 0.5f;
 		if (farVec.w <= 0.0f) {
 			farVal = 0.0f;
 		}
-
 		// Sanity check
 		if (nearVal > farVal) {
 			nearVal = farVal;
 		}
-		glEnable(GL_DEPTH_BOUNDS_TEST_EXT);
-		glDepthBoundsEXT(nearVal, farVal); // zMin <= z <= zMax // 0.0f...1.0f
+		if (glDepthBoundsEXT) {
+			glEnable(GL_DEPTH_BOUNDS_TEST_EXT);
+			glDepthBoundsEXT(nearVal, farVal); // zMin <= z <= zMax // 0.0f...1.0f
+		}
 		// 0.96 .. 0.99
   }
 	const vec4& outColor = lightIndices[lightIndex];
@@ -879,7 +887,7 @@ void App::drawLIDeferLight(GLubyte lightIndex, const vec3 &lightPosition, float 
   //TODO: Render lowers detail spheres when light is far away?
   // Draw a sphere the radius of the light
   sphereModel->draw(renderer);
-  if (!depthBoundTest) {
+  if (glDepthBoundsEXT && !depthBoundTest) {
 	  glDisable(GL_DEPTH_BOUNDS_TEST_EXT);
   }
 }
@@ -1013,14 +1021,23 @@ void App::drawLightBuffer()
 
 }
 
+
+
 ///////////////////////////////////////////////////////////////////////////////
 //
 void App::drawFrame(){
-  
   // Update and load the modelview and projection matrices
-  projectionMatrix = perspectiveMatrixX(1.5f, width, height, 5, 4000);
-  modelviewMatrix = rotateXY(-wx, -wy);
-  modelviewMatrix.translate(-camPos);
+#ifdef USE_D3D_STYLE
+  Matrix4x4& mat = reinterpret_cast<Matrix4x4&>(projectionMatrix);
+  mat.PerspectiveFovDirect3D(1.5f / (degrad), static_cast<float>(width) / height, 5, 4000);
+  mat.Transpose();
+  modelviewMatrix = rotateXY(wx, wy);
+  modelviewMatrix.translate(camPos);
+#else
+	projectionMatrix = perspectiveMatrixY(1.5f, width, height, 5, 4000);
+	modelviewMatrix = rotateXY(-wx, -wy);
+	modelviewMatrix.translate(-camPos);
+#endif
   modelviewMatrixProjMatrix = projectionMatrix * modelviewMatrix;
 
   // If switching to the static light scene
