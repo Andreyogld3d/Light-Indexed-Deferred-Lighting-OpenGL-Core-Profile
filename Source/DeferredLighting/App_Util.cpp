@@ -26,6 +26,7 @@
 #define SECONDARY_LIGHT_COUNT       (MAX_LIGHT_TOTAL - PRIMARY_LIGHT_COUNT)
 #define SECONDARY_LIGHT_LIFETIME    8.0f
 #define SECONDARY_LIGHT_SPAWNRATE   (SECONDARY_LIGHT_LIFETIME / (float)SECONDARY_LIGHT_COUNT)
+//#define USE_SIMPLE_LIGHT_AMIMATION
 
 
 GLint 
@@ -471,7 +472,7 @@ void App::updatePrimaryLights(float t){
 ///////////////////////////////////////////////////////////////////////////////
 //
 void App::updateLights(float updateTime){
-#if 0
+#ifdef USE_SIMPLE_LIGHT_AMIMATION
     auto RotatePos = [](Vector3D& pos, size_t lightIndex, Vector3D& dirOffset)
     {
         float angle = Pi / 360.0f + lightIndex / 512.0f;//Math::Rand(Pi / 120, Pi / 90.0f);
@@ -496,18 +497,21 @@ void App::updateLights(float updateTime){
         return;
     }
     dt = 0.0f;
-    for (uint lightIndex = 0; lightIndex < _countof(lights); ++lightIndex) {
-        //Light& light = lights[lightIndex];
-        //vec4& LightPos = lightsPositions[lightIndex];
+    static bool resetPos;
+    if (!resetPos) {
+        using Light = LightData;
+        for (uint lightIndex = 0; lightIndex < _countof(lights); ++lightIndex) {
+            Light& light = lightDataArray[lightIndex];
+            vec3& LightPos = light.position;
+            LightPos.y = light.size * 0.5f;
+        }
+        resetPos = true;
+    }
+   for (uint lightIndex = 0; lightIndex < _countof(lights); ++lightIndex) {
         vec3& LightPos = lightDataArray[lightIndex].position;
         Vector3D& dirOffset = dirPosOffsets[lightIndex];
         Vector3D& pos = reinterpret_cast<Vector3D&>(LightPos);
         RotatePos(pos, lightIndex, dirOffset);
-        //memcpy(light.posRange, LightPos, sizeof(light.posRange));
-        // move light to View space, to do GPU Side
-        //TransformCoord(reinterpret_cast<Vector3D &>(light.posRange), reinterpret_cast<Matrix4x4 &>(modelviewMatrix));
-        //TransformCoord(reinterpret_cast<Vector3D &>(LightPos), reinterpret_cast<Matrix4x4 &>(modelviewMatrix));
-        //light.Range = 1.0f / LightPos.w;
     }
 #else
   static float animateTime = 0.0f;
