@@ -11,8 +11,13 @@ The original demo was modified:
 # Purpose
 
 1) Port from original OpenGL to Direct3D12/Vulkan, see issue https://github.com/Andreyogld3d/LightIndexedDeferredRendering_Direct3D12/issues/1
-2) Replace bit operations to integer textures
-3) Upgrade to modern Deferred techique like as Tiled/Clustered Forward+ Shading 
+ We can see the same bug:
+ ![Screenshot](https://github.com/Andreyogld3d/Light-Indexed-Deferred-Lighting-OpenGL-Core-Profile/blob/main/Source/DeferredLighting/lidr_gl.png)
+ It can be reproduced using the followinf modification:
+ 1. Turn on macros https://github.com/Andreyogld3d/Light-Indexed-Deferred-Lighting-OpenGL-Core-Profile/blob/main/Source/DeferredLighting/App.cpp#L28
+ 2. Turn on macros https://github.com/Andreyogld3d/Light-Indexed-Deferred-Lighting-OpenGL-Core-Profile/blob/main/Source/DeferredLighting/App_Util.cpp#L29
+3) Replace bit operations to integer textures
+4) Upgrade to modern Deferred techique like as Tiled/Clustered Forward+ Shading 
 
 # Requirements:
 
