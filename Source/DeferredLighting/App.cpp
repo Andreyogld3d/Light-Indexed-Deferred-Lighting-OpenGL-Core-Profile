@@ -25,6 +25,9 @@
 #include <algorithm>
 
 //#define NO_LIGHT_VIEW_SPACE
+//#define DRAW_PLANE_ONLY
+#define USE_UBO
+//#define USE_D3D_STYLE
 
 BaseApp *app = new App();
 
@@ -43,9 +46,6 @@ enum LightCountPerFragment
 LightData App::lightDataArray[MAX_LIGHT_TOTAL] = {
 #include "LightPositions.h"
 };
-
-#define USE_UBO
-//#define USE_D3D_STYLE
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -828,14 +828,18 @@ void App::drawDepthOnly()
   renderer->setRasterizerState(cullBack);
   renderer->apply();
  
-  //glClearStencil(0);
-  //glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-  glClear(GL_DEPTH_BUFFER_BIT);
-  outGLError();
+	//Clear the output color and depth
+  float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+  renderer->clear(true, true, clearColor);
 
+  outGLError();
+#ifndef DRAW_PLANE_ONLY
   map->draw(renderer);
   outGLError();
   horseModel->draw(renderer);
+#else
+  drawMeshData(meshPlane);
+#endif
   outGLError();
 }
 
@@ -901,10 +905,6 @@ void App::drawLIDeferLights(){
   renderer->changeRenderTarget(lightIndexBuffer, depthRT);
   drawDepthOnly();
 
-  //Clear the output color
-  float clearColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-  renderer->clear(true, false, clearColor);
-
   // Set the constant blend color to bit shift 2 bits down on each call
   glBlendColor(0.251f, 0.251f, 0.251f, 0.251f); 
 
@@ -958,6 +958,7 @@ void App::drawLIDeferLitObjects()
   renderer->UpdateUBO(UBOlightingLIDefer, lights, sizeof(lights));
 #endif
   //Loop for all pieces of geometry
+#ifndef DRAW_PLANE_ONLY
   for (uint k = 0; k < 4; k++){
     renderer->setTexture("Base", base[k]);
     renderer->setTexture("Bump", bump[k]);
@@ -970,7 +971,7 @@ void App::drawLIDeferLitObjects()
     map->drawBatch(renderer, k);
   }
   outGLError();
-
+#endif
   renderer->reset();
   renderer->setShader(lightingLIDefer_stone);
   renderer->setShaderConstant4x4f("ModelViewProjectionMatrix", modelviewMatrixProjMatrix);
@@ -986,11 +987,11 @@ void App::drawLIDeferLitObjects()
   renderer->setTexture("LightColorTex", bitMaskLightColors);
   renderer->setTexture("LightPosTex", bitMaskLightPos);
   renderer->apply();
-
-  //drawMeshData(meshPlane);
-
+#ifndef DRAW_PLANE_ONLY
   horseModel->draw(renderer);
-
+#else
+  drawMeshData(meshPlane);
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
